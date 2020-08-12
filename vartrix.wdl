@@ -10,13 +10,20 @@ workflow vartrix_tests {
   File fasta = "/fh/fast/paguirigan_a/pub/ReferenceDataSets/genome_data/human/hg38/Homo_sapiens_assembly38.fasta"
   File fastaIndex = "/fh/fast/paguirigan_a/pub/ReferenceDataSets/genome_data/human/hg38/Homo_sapiens_assembly38.fasta.fai"
   File barcodes = "s3://fh-pi-paguirigan-a/tg/SR/ngs/illumina/apaguiri/191126_A00613_0081_BHJ2CLDRXX/cellranger/count/countOCItrial1/outs/filtered_feature_bc_matrix/barcodes.tsv.gz"
+  # Software/Modules/Docker
   String vartrixDocker = "vortexing/vartrix:v1.1.16"
-
+  String samtoolsModule = "SAMtools/1.10-GCCcore-8.3.0"
+   call convertCellRangerDict {
+    input:
+      cellRangerBam = cellRangerBam,
+      taskModules = samtoolsModule,
+      threads = 8
+  }
   call vartrix {
     input:
       vcf = vcf,
-      cellRangerBam = cellRangerBam,
-      cellRangerBai = cellRangerBai,
+      cellRangerBam = convertCellRangerDict.convertedBam,
+      cellRangerBai = convertCellRangerDict.convertedBai,
       fasta = fasta,
       fastaIndex = fastaIndex,
       barcodes = barcodes,
@@ -49,5 +56,30 @@ task vartrix {
   runtime {
     cpu: threads
     docker: taskDocker
+  }
+}
+
+task convertCellRangerDict {
+  input {
+    File cellRangerBam
+    String taskModules
+    Int threads
+  }
+    String filename = basename(cellRangerBam, ".bam")
+  command {
+    set -eo pipefail
+    samtools view -H ~{cellRangerBam} | \
+      sed -e 's/SN:\([0-9XY]\)/SN:chr\1/' -e 's/SN:MT/SN:chrM/' |
+      samtools reheader - ~{cellRangerBam} > ~{filename}.converted.bam
+
+    samtools index -@ ~{threads} ~{filename}.converted.bam
+  }
+  output {
+    File convertedBam = "~{filename}.converted.bam"
+    File convertedBai = "~{filename}.converted.bam.bai"
+  }
+  runtime {
+    modules: taskModules
+    cpu: threads
   }
 }
